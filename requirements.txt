@@ -1,0 +1,7 @@
+streamlit>=1.37
+sqlalchemy>=2.0
+pandas
+numpy
+matplotlib
+openpyxl
+psycopg2-binary

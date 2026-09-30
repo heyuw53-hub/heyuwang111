@@ -1,10 +1,11 @@
 """Page enseignant : consultation en temps réel, nettoyage, distribution, export."""
 import hmac
 
+import pandas as pd
 import streamlit as st
 
 import db
-from analysis import excel, figure_distribution, nettoyer, statistiques, vers_format_modele
+from analysis import excel, figure_distribution, nettoyer, statistiques, valeurs_aberrantes, vers_format_modele
 from config import EXPERIENCES, GROUPES, SEUIL_DEFAUT
 
 st.set_page_config(page_title="Résultats", page_icon="📊", layout="wide")
@@ -62,6 +63,7 @@ def tableau_de_bord():
     df = db.charger(cle, annee)
     df = df[df["groupe"].isin(groupes)]
     garde, exclu = nettoyer(df, cols, seuil, reference)
+    aberrant = valeurs_aberrantes(df, cols, seuil, reference)
 
     a, b, c = st.columns(3)
     a.metric("Saisies", len(df))
@@ -85,13 +87,19 @@ def tableau_de_bord():
             vue = vers_format_modele(d, champs).drop(columns="Année")
             vue.insert(0, "id", d["id"].values)
             vue["Saisi le"] = d["cree_le"].values
-            st.dataframe(vue, hide_index=True, column_config=formats)
+            # même code couleur que l'export Excel : valeurs aberrantes en jaune
+            fond = pd.DataFrame("", index=vue.index, columns=vue.columns)
+            for c in champs:
+                fond[c["label"]] = aberrant.loc[d.index, c["col"]].map(
+                    {True: "background-color: #FFFF00; color: black", False: ""}).values
+            st.dataframe(vue.style.apply(lambda _: fond, axis=None), hide_index=True, column_config=formats)
 
-    d1, d2 = st.columns(2)
-    d1.download_button(f"⬇️ Données brutes {annee} (.xlsx)", excel(df, champs, str(annee)),
-                       file_name=f"{exp['fichier_export']}_{annee}.xlsx")
-    d2.download_button(f"⬇️ Données nettoyées {annee} (.xlsx)", excel(garde, champs, str(annee)),
-                       file_name=f"{exp['fichier_export']}_{annee}_nettoye.xlsx")
+    st.download_button(
+        f"⬇️ Excel {annee} – toutes les saisies, valeurs aberrantes en jaune",
+        excel(df, champs, str(annee), masque=aberrant),
+        file_name=f"{exp['fichier_export']}_{annee}.xlsx",
+        help=f"Aucune ligne supprimée. Jaune = valeur hors ±{seuil:.0%} de la {reference}.",
+    )
 
 
 tableau_de_bord()

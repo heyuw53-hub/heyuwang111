@@ -13,20 +13,29 @@ import pandas as pd
 
 
 
-def nettoyer(df: pd.DataFrame, cols: list[str], seuil: float = 0.30, reference: str = "moyenne"):
-    """Garde les lignes dont TOUTES les valeurs sont à ±seuil de la référence.
+def valeurs_aberrantes(df: pd.DataFrame, cols: list[str], seuil: float = 0.30,
+                       reference: str = "moyenne") -> pd.DataFrame:
+    """Tableau booléen de même forme que df[cols] : True = valeur hors de ±seuil de la référence.
 
     reference = "moyenne" (comme les scripts d'origine) ou "médiane"
     (plus robuste : une valeur aberrante ne décale pas la fenêtre).
+    """
+    masque = pd.DataFrame(False, index=df.index, columns=cols)
+    for c in cols:
+        x = df[c]
+        ref = x.mean() if reference == "moyenne" else x.median()
+        bas, haut = sorted((ref * (1 - seuil), ref * (1 + seuil)))
+        masque[c] = x.notna() & ~x.between(bas, haut)
+    return masque
+
+
+def nettoyer(df: pd.DataFrame, cols: list[str], seuil: float = 0.30, reference: str = "moyenne"):
+    """Garde les lignes dont TOUTES les valeurs sont à ±seuil de la référence.
     Retourne (df_gardé, df_exclu).
     """
     d = df.dropna(subset=cols)
-    masque = pd.Series(True, index=d.index)
-    for c in cols:
-        ref = d[c].mean() if reference == "moyenne" else d[c].median()
-        bas, haut = sorted((ref * (1 - seuil), ref * (1 + seuil)))
-        masque &= d[c].between(bas, haut)
-    return d[masque], d[~masque]
+    exclu = valeurs_aberrantes(d, cols, seuil, reference).any(axis=1)
+    return d[~exclu], d[exclu]
 
 
 def statistiques(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:
@@ -79,9 +88,26 @@ def vers_format_modele(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:
     return df[list(renommage)].rename(columns=renommage)
 
 
-def excel(df: pd.DataFrame, champs: list[dict], feuille: str) -> bytes:
-    """Classeur à une seule feuille."""
+JAUNE = "FFFF00"
+
+
+def excel(df: pd.DataFrame, champs: list[dict], feuille: str, masque: pd.DataFrame | None = None) -> bytes:
+    """Classeur à une seule feuille. Si `masque` est fourni (cf. valeurs_aberrantes),
+    les cellules aberrantes sont surlignées en jaune ; aucune ligne n'est supprimée."""
+    from openpyxl.styles import PatternFill
+
+    vue = vers_format_modele(df, champs)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        vers_format_modele(df, champs).to_excel(w, sheet_name=feuille, index=False)
+        vue.to_excel(w, sheet_name=feuille, index=False)
+        ws = w.sheets[feuille]
+        for j, nom in enumerate(vue.columns, start=1):  # largeur de colonne lisible
+            ws.column_dimensions[ws.cell(1, j).column_letter].width = max(10, len(str(nom)) + 2)
+        if masque is not None:
+            jaune = PatternFill(start_color=JAUNE, end_color=JAUNE, fill_type="solid")
+            for c in champs:
+                j = vue.columns.get_loc(c["label"]) + 1
+                for i, aberrant in enumerate(masque.loc[df.index, c["col"]].to_numpy(), start=2):
+                    if aberrant:
+                        ws.cell(i, j).fill = jaune
     return buf.getvalue()

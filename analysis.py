@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from config import N_MIN_GAUSS
+
 
 
 def valeurs_aberrantes(df: pd.DataFrame, cols: list[str], seuil: float = 0.30,
@@ -19,10 +21,13 @@ def valeurs_aberrantes(df: pd.DataFrame, cols: list[str], seuil: float = 0.30,
 
     reference = "moyenne" (comme les scripts d'origine) ou "médiane"
     (plus robuste : une valeur aberrante ne décale pas la fenêtre).
+    Le nettoyage ne s'applique qu'à partir de N_MIN_GAUSS valeurs.
     """
     masque = pd.DataFrame(False, index=df.index, columns=cols)
     for c in cols:
         x = df[c]
+        if x.notna().sum() < N_MIN_GAUSS:
+            continue  # trop peu de valeurs : la moyenne n'est pas une référence fiable, on ne marque rien
         ref = x.mean() if reference == "moyenne" else x.median()
         bas, haut = sorted((ref * (1 - seuil), ref * (1 + seuil)))
         masque[c] = x.notna() & ~x.between(bas, haut)
@@ -90,8 +95,9 @@ def couleur(i: int) -> str:
     return PALETTE[i % len(PALETTE)]
 
 
-def _mu_sigma(x: np.ndarray):
-    if len(x) >= 2 and np.std(x, ddof=1) > 0:
+def _mu_sigma(x: np.ndarray, n_min: int = N_MIN_GAUSS):
+    """(μ, σ) si assez de données pour une gaussienne, sinon None."""
+    if len(x) >= max(2, n_min) and np.std(x, ddof=1) > 0:
         return float(np.mean(x)), float(np.std(x, ddof=1))
     return None
 
@@ -132,7 +138,12 @@ def _histo_gauss(ax, x: np.ndarray, label: str, point: float | None = None):
     ax.hist(x, bins="auto", density=True, color=BARRES, edgecolor="white", linewidth=1.5)
     ms = _mu_sigma(x)
     if not ms:
-        ax.set_title(f"n = {len(x)} (pas assez de données pour la gaussienne)")
+        ax.set_title(f"n = {len(x)} : gaussienne affichée à partir de {N_MIN_GAUSS} binômes")
+        if point is not None:  # le binôme se voit quand même, sur l'axe
+            ax.plot([point], [0], "o", ms=10, color=ROUGE, mec="white", mew=2, zorder=5,
+                    clip_on=False, label="Votre binôme")
+            ax.axvline(point, color=ROUGE, lw=1, alpha=0.5)
+            ax.legend(loc="upper right")
         return
     mu, sigma = ms
     xs = _xs([x], [point] if point is not None else [])
@@ -159,6 +170,12 @@ def figure_distribution(df: pd.DataFrame, champs: list[dict], point: dict | None
     return fig
 
 
+# matplotlib ≥ 3.10 : orientation= ; versions antérieures : vert=
+import inspect as _inspect
+_HORIZONTAL = ({"orientation": "horizontal"} if "orientation" in _inspect.signature(plt.Axes.boxplot).parameters
+               else {"vert": False})
+
+
 def _jitter(n, largeur=0.12, graine=0):
     return np.random.default_rng(graine).uniform(-largeur, largeur, n)
 
@@ -178,7 +195,7 @@ def figure_intra_groupe(df: pd.DataFrame, champs: list[dict]):
         if len(x) == 0:
             ax.set_yticks([])
             continue
-        ax.boxplot(x, vert=False, widths=0.5, patch_artist=True, showfliers=False,
+        ax.boxplot(x, **_HORIZONTAL, widths=0.5, patch_artist=True, showfliers=False,
                    boxprops=dict(facecolor=BARRES, edgecolor=COURBE), medianprops=dict(color=ENCRE, lw=2),
                    whiskerprops=dict(color=COURBE), capprops=dict(color=COURBE))
         ax.set_yticks([])
@@ -216,7 +233,7 @@ def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites
                     ax.plot(xs, _pdf(xs, *ms), color=couleur(i), lw=2, label=f"{m} (n={len(x)})")
                     ax.axvline(ms[0], color=couleur(i), ls="--", lw=1)
                 elif len(x):
-                    ax.plot([], [], color=couleur(i), lw=2, label=f"{m} (n={len(x)}, trop peu)")
+                    ax.plot([], [], color=couleur(i), lw=2, label=f"{m} (n={len(x)}, < {N_MIN_GAUSS} : pas de courbe)")
             ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=8)
         # --- boîtes ou nuage
         ax = axes[1, j]
@@ -241,7 +258,7 @@ def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites
                     continue
                 ax.scatter(p + _jitter(len(x), 0.15, graine=i), x, s=22, color=couleur(i),
                            edgecolor="white", linewidth=0.8, zorder=3)
-                ms = _mu_sigma(x)
+                ms = _mu_sigma(x, n_min=2)
                 if ms:
                     ax.errorbar(p + 0.3, ms[0], yerr=ms[1], fmt="D", color=ENCRE, ms=6, capsize=4, lw=1.5, zorder=4)
             ax.plot([], [], "D", color=ENCRE, label="moyenne ± σ")

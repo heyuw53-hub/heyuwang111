@@ -15,6 +15,10 @@ ANNEE_MIN, ANNEE_MAX = 2000, 2100
 # Numéro de binôme : bornes acceptées (entier)
 BINOME_MIN, BINOME_MAX = 1, 99
 
+# En dessous de ce nombre de binômes, on n'ajuste pas de gaussienne (trop peu fiable) :
+# on montre seulement l'histogramme / les points.
+N_MIN_GAUSS = 5
+
 SEUIL_DEFAUT = 0.30  # ±30 % autour de la référence, comme dans les scripts d'origine
 
 EXPERIENCES = {

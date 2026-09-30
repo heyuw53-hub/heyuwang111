@@ -4,7 +4,7 @@ import streamlit as st
 
 import db
 from analysis import figure_distribution, nettoyer
-from config import BINOME_MAX, BINOME_MIN, EXPERIENCES, GROUPES, SEUIL_DEFAUT
+from config import BINOME_MAX, BINOME_MIN, EXPERIENCES, GROUPES, N_MIN_GAUSS, SEUIL_DEFAUT
 
 st.set_page_config(page_title="Résultats étudiants", page_icon="📈", layout="wide")
 st.title("📈 Où se situe mon résultat ?")
@@ -62,14 +62,15 @@ def distribution():
         for c in champs:
             x = garde[c["col"]].to_numpy(dtype=float)
             v = point[c["col"]]
-            if len(x) >= 2 and np.std(x, ddof=1) > 0:
+            if len(x) >= N_MIN_GAUSS and np.std(x, ddof=1) > 0:
                 mu, s = x.mean(), np.std(x, ddof=1)
                 z = (v - mu) / s
                 pos = f"{z:+.2f} σ"
                 commentaire = ("proche de la moyenne" if abs(z) < 1 else
                                "un peu éloigné de la moyenne" if abs(z) < 2 else "loin de la moyenne")
             else:
-                mu, pos, commentaire = (x.mean() if len(x) else float("nan")), "–", "pas assez de données"
+                mu, pos, commentaire = ((x.mean() if len(x) else float("nan")), "–",
+                                        f"pas encore assez de binômes (min. {N_MIN_GAUSS})")
             lignes.append({"Grandeur": c["label"], "Votre valeur": f"{v:.4g}",
                            "Moyenne promo": f"{mu:.4g}", "Écart": pos, "": commentaire})
         st.dataframe(lignes, hide_index=True)

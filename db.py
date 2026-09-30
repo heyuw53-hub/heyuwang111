@@ -31,9 +31,15 @@ for _cle, _exp in EXPERIENCES.items():
 
 def _database_url() -> str:
     try:
-        return st.secrets["DATABASE_URL"]
+        url = st.secrets["DATABASE_URL"].strip()
     except Exception:
         return "sqlite:///tp_data.db"
+    # Lien Supabase copié tel quel ("postgresql://..." ou "postgres://...") :
+    # on impose le pilote psycopg2 installé via requirements.txt.
+    for prefixe in ("postgresql://", "postgres://"):
+        if url.startswith(prefixe):
+            return "postgresql+psycopg2://" + url[len(prefixe):]
+    return url
 
 
 @st.cache_resource

@@ -7,7 +7,7 @@ Pour ajouter / modifier un champ, il suffit d'éditer ce fichier.
            pour 0 (une concentration doit être > 0).
 """
 
-GROUPES = ["A", "B", "C", "D"]
+GROUPES = ["A", "B", "C", "D","CBT"]
 
 # Année de la promotion : bornes acceptées dans le formulaire
 ANNEE_MIN, ANNEE_MAX = 2000, 2100

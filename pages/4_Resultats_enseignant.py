@@ -5,7 +5,8 @@ import pandas as pd
 import streamlit as st
 
 import db
-from analysis import (excel, figure_comparaison, figure_distribution, figure_intra_groupe, nettoyer,
+from affichage import graphique
+from analysis import (COLONNES_NUMERIQUES, excel, figure_comparaison, figure_distribution, figure_intra_groupe, nettoyer,
                       statistiques, statistiques_par, valeurs_aberrantes, vers_format_modele)
 from config import EXPERIENCES, GROUPES, SEUIL_DEFAUT
 
@@ -87,10 +88,12 @@ def tableau_de_bord():
 
     base = garde if donnees_affichees == "données nettoyées" else df
     st.subheader(f"Distribution ({donnees_affichees})")
-    st.pyplot(figure_distribution(base, champs), clear_figure=True)
+    graphique(figure_distribution, base, champs)
     st.dataframe(statistiques(base, champs), hide_index=True,
-                 column_config={k: st.column_config.NumberColumn(format="%.4g")
-                                for k in ["Moyenne", "Écart-type", "CV (%)", "Min", "Max"]})
+                 column_config={k: st.column_config.NumberColumn(format="%.4g") for k in COLONNES_NUMERIQUES})
+    st.caption("Résultat (95 %) = moyenne ± t·σ/√N (incertitude de type A, Student à N−1 degrés de liberté), "
+               "incertitude arrondie à 1 chiffre significatif par excès. "
+               "Compatible = la valeur théorique est dans l'intervalle moyenne ± incertitude élargie.")
 
     t1, t2, t3 = st.tabs([f"Toutes les saisies ({len(df)})", f"Gardées ({len(garde)})", f"Exclues ({len(exclu)})"])
     for onglet, d in [(t1, df), (t2, garde), (t3, exclu)]:
@@ -124,7 +127,7 @@ def preparer(df):
 
 def tableau_stats(t):
     st.dataframe(t, hide_index=True, column_config={
-        k: st.column_config.NumberColumn(format="%.4g") for k in ["Moyenne", "Écart-type", "CV (%)"]})
+        k: st.column_config.NumberColumn(format="%.4g") for k in COLONNES_NUMERIQUES if k in t.columns})
 
 
 @st.fragment(run_every=10 if auto else None)
@@ -135,7 +138,7 @@ def intra_groupe():
     if d.empty:
         st.info("Aucune donnée pour ce groupe.")
         return
-    st.pyplot(figure_intra_groupe(d, champs), clear_figure=True)
+    graphique(figure_intra_groupe, d, champs)
     st.caption("Boîte à moustaches : médiane, quartiles, étendue ; chaque point est un binôme (n° au-dessus).")
     tableau_stats(statistiques(d, champs).drop(columns=["Min", "Max"]))
 
@@ -148,7 +151,7 @@ def inter_groupes():
     if not presents:
         st.info("Aucune donnée pour les groupes choisis.")
         return
-    st.pyplot(figure_comparaison(d, champs, "groupe", presents, "boite"), clear_figure=True)
+    graphique(figure_comparaison, d, champs, "groupe", presents, "boite")
     tableau_stats(statistiques_par(d, champs, "groupe", presents, "Groupe"))
 
 
@@ -162,7 +165,7 @@ def inter_annuel():
     if not presentes:
         st.info("Aucune donnée pour les années choisies.")
         return
-    st.pyplot(figure_comparaison(d, champs, "annee", presentes, "nuage"), clear_figure=True)
+    graphique(figure_comparaison, d, champs, "annee", presentes, "nuage")
     tableau_stats(statistiques_par(d, champs, "annee", presentes, "Année"))
 
 

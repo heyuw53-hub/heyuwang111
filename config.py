@@ -5,6 +5,7 @@ Pour ajouter / modifier un champ, il suffit d'éditer ce fichier.
 - label  : intitulé affiché et utilisé dans l'export Excel (identique au modèle d'origine)
 - min/max: bornes de validation (None = pas de borne). Les bornes min sont exclusives
            pour 0 (une concentration doit être > 0).
+- theorique (optionnel) : valeur de référence (ex. étiquette de la boîte), dans l'unité du champ.
 """
 
 GROUPES = ["A", "B", "C", "D","CBT"]
@@ -24,12 +25,13 @@ SEUIL_DEFAUT = 0.30  # ±30 % autour de la référence, comme dans les scripts d
 EXPERIENCES = {
     "polaro": {
         "titre": "TP Polarographie",
-        "table": "resultats_polaro",
+        # Nouvelle table : l'ancienne (resultats_polaro, 3 concentrations) est conservée telle quelle.
+        "table": "resultats_polaro_v2",
         "fichier_export": "TP_Polaro",
         "champs": [
-            {"col": "conc_mol_l", "label": "Concentration (mol/L)", "min": 0, "max": None, "exemple": "ex. 1,25e-4"},
-            {"col": "conc_ppm", "label": "Concentration (ppm)", "min": 0, "max": None, "exemple": "ex. 12,3"},
-            {"col": "conc_ug", "label": "Concentration (µg)", "min": 0, "max": None, "exemple": "ex. 250"},
+            {"col": "masse_zn_ug", "label": "Masse de zinc dans la gélule (µg)", "min": 0, "max": None,
+             "exemple": "ex. 14 600",
+             "theorique": 15000},  # Rubozinc : 15 mg de zinc par gélule (étiquette de la boîte)
         ],
     },
     "uv": {

@@ -3,7 +3,8 @@ import numpy as np
 import streamlit as st
 
 import db
-from analysis import figure_distribution, nettoyer
+from affichage import graphique
+from analysis import figure_distribution, incertitude_type_a, nettoyer
 from config import BINOME_MAX, BINOME_MIN, EXPERIENCES, GROUPES, N_MIN_GAUSS, SEUIL_DEFAUT
 
 st.set_page_config(page_title="Résultats étudiants", page_icon="📈", layout="wide")
@@ -55,7 +56,14 @@ def distribution():
         st.info("Choisissez votre groupe et votre numéro de binôme pour voir votre position.")
 
     st.metric("Binômes pris en compte", len(garde))
-    st.pyplot(figure_distribution(garde, champs, point=point), clear_figure=True)
+    for c in champs:
+        r = incertitude_type_a(garde[c["col"]])
+        if r["n"] > 1:
+            texte = f"**{c['label']} – résultat de la promotion (95 %) :** {r['Résultat (95 %)']}"
+            if c.get("theorique"):
+                texte += f" — valeur théorique : {c['theorique']:g}"
+            st.markdown(texte)
+    graphique(figure_distribution, garde, champs, point=point)
 
     if point:
         lignes = []
@@ -71,8 +79,12 @@ def distribution():
             else:
                 mu, pos, commentaire = ((x.mean() if len(x) else float("nan")), "–",
                                         f"pas encore assez de binômes (min. {N_MIN_GAUSS})")
-            lignes.append({"Grandeur": c["label"], "Votre valeur": f"{v:.4g}",
-                           "Moyenne promo": f"{mu:.4g}", "Écart": pos, "": commentaire})
+            ligne = {"Grandeur": c["label"], "Votre valeur": f"{v:.6g}",
+                     "Moyenne promo": f"{mu:.6g}", "Écart": pos, "": commentaire}
+            if c.get("theorique"):
+                ligne["Valeur théorique"] = f"{c['theorique']:g}"
+                ligne["Écart / théorique"] = f"{100 * (v - c['theorique']) / c['theorique']:+.1f} %"
+            lignes.append(ligne)
         st.dataframe(lignes, hide_index=True)
         if not ((garde["groupe"] == groupe) & (garde["binome"] == int(binome))).any():
             st.warning("Votre résultat est en dehors de la plage retenue (valeur aberrante) : "

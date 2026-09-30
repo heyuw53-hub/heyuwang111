@@ -43,22 +43,79 @@ def nettoyer(df: pd.DataFrame, cols: list[str], seuil: float = 0.30, reference: 
     return d[~exclu], d[exclu]
 
 
+# ---------------------------------------------------------------------------
+# Incertitudes (document ECPM-TPSA-MOP-003 « Traitement des données »)
+# ---------------------------------------------------------------------------
+# Coefficient de Student à 95 % en fonction du nombre de degrés de liberté.
+# 1 à 14 : tableau du document ; au-delà : valeurs usuelles des tables de Student.
+STUDENT_95 = {1: 12.7, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57, 6: 2.45, 7: 2.36, 8: 2.31, 9: 2.26,
+              10: 2.23, 11: 2.20, 12: 2.18, 13: 2.16, 14: 2.14, 15: 2.13, 16: 2.12, 17: 2.11,
+              18: 2.10, 19: 2.09, 20: 2.09, 25: 2.06, 30: 2.04, 40: 2.02, 60: 2.00, 120: 1.98}
+
+
+def t_student_95(ddl: int) -> float:
+    """t à 95 % ; entre deux valeurs tabulées on prend la plus grande (prudent)."""
+    if ddl < 1:
+        return float("nan")
+    tabules = [k for k in STUDENT_95 if k <= ddl]
+    return STUDENT_95[max(tabules)] if ddl <= 120 else 1.96
+
+
+def arrondi_resultat(valeur: float, incertitude: float) -> str:
+    """Règles du document : incertitude à 1 chiffre significatif arrondie PAR EXCÈS,
+    résultat arrondi au même rang décimal. Ex. (45.123456, 0.018453) -> '45.12 ± 0.02'."""
+    if not (np.isfinite(valeur) and np.isfinite(incertitude)) or incertitude <= 0:
+        return "–"
+    e = int(np.floor(np.log10(incertitude)))
+    inc = np.ceil(round(incertitude / 10 ** e, 9)) * 10 ** e   # round() évite 2.0000001 -> 3
+    e = int(np.floor(np.log10(inc)))                            # 9.2 -> 10 change de rang
+    dec = max(0, -e)
+    return f"{round(valeur, -e):.{dec}f} ± {inc:.{dec}f}"
+
+
+def incertitude_type_a(x) -> dict:
+    """Série de N résultats (un par binôme) : incertitude de type A sur la moyenne.
+    σ (N-1) ; u = σ/√N ; incertitude élargie v = t(N-1, 95 %) · u."""
+    x = pd.Series(x, dtype=float).dropna()
+    n = len(x)
+    moy = x.mean() if n else np.nan
+    sigma = x.std(ddof=1) if n > 1 else np.nan
+    u = sigma / np.sqrt(n) if n > 1 else np.nan
+    t = t_student_95(n - 1) if n > 1 else np.nan
+    v = t * u if n > 1 else np.nan
+    return {"n": n, "Moyenne": moy, "Écart-type": sigma, "u = σ/√N": u, "t (95 %)": t,
+            "Incertitude élargie": v, "Résultat (95 %)": arrondi_resultat(moy, v)}
+
+
+def comparaison_theorique(r: dict, theo: float | None) -> dict:
+    """Écart relatif de la moyenne à la valeur théorique, et compatibilité :
+    la valeur théorique est-elle dans [moyenne − v ; moyenne + v] ?"""
+    if not theo:
+        return {"Valeur théorique": np.nan, "Écart relatif (%)": np.nan, "Compatible": "–"}
+    ecart = 100 * (r["Moyenne"] - theo) / theo
+    v = r["Incertitude élargie"]
+    compatible = "–" if not np.isfinite(v) else ("oui" if abs(r["Moyenne"] - theo) <= v else "non")
+    return {"Valeur théorique": theo, "Écart relatif (%)": ecart, "Compatible": compatible}
+
+
+COLONNES_NUMERIQUES = ["Valeur théorique", "Écart relatif (%)", "Moyenne", "Écart-type", "CV (%)", "u = σ/√N", "t (95 %)", "Incertitude élargie",
+                       "Min", "Max"]
+
+
 def statistiques(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:
     lignes = []
     for c in champs:
         x = df[c["col"]].dropna()
-        moy = x.mean() if len(x) else np.nan
-        ecart = x.std(ddof=1) if len(x) > 1 else np.nan
-        lignes.append({
-            "Grandeur": c["label"],
-            "n": len(x),
-            "Moyenne": moy,
-            "Écart-type": ecart,
-            "CV (%)": 100 * ecart / moy if moy else np.nan,
-            "Min": x.min() if len(x) else np.nan,
-            "Max": x.max() if len(x) else np.nan,
-        })
-    return pd.DataFrame(lignes)
+        r = incertitude_type_a(x)
+        r["CV (%)"] = 100 * r["Écart-type"] / r["Moyenne"] if r["Moyenne"] else np.nan
+        lignes.append({"Grandeur": c["label"], **r, **comparaison_theorique(r, c.get("theorique")),
+                       "Min": x.min() if len(x) else np.nan, "Max": x.max() if len(x) else np.nan})
+    cols = ["Grandeur", "n", "Résultat (95 %)", "Valeur théorique", "Écart relatif (%)", "Compatible",
+            "Moyenne", "Écart-type", "CV (%)", "u = σ/√N", "t (95 %)", "Incertitude élargie", "Min", "Max"]
+    t = pd.DataFrame(lignes)[cols]
+    if not any(c.get("theorique") for c in champs):
+        t = t.drop(columns=["Valeur théorique", "Écart relatif (%)", "Compatible"])
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +185,16 @@ def _vide(ax, texte="Aucune donnée"):
     ax.text(0.5, 0.5, texte, ha="center", va="center", transform=ax.transAxes, color=ENCRE)
 
 
-def _histo_gauss(ax, x: np.ndarray, label: str, point: float | None = None):
+THEO = "#7b3fb5"        # valeur théorique (violet : hors palette des groupes/années)
+
+
+def _ligne_theorique(ax, theo: float | None):
+    if theo:
+        ax.axvline(theo, color=THEO, lw=2, ls="-.", label=f"Valeur théorique ({theo:g})", zorder=4)
+        ax.legend(loc="best")
+
+
+def _histo_gauss(ax, x: np.ndarray, label: str, point: float | None = None, theo: float | None = None):
     """Histogramme + gaussienne ; `point` = valeur d'un étudiant (point rouge sur la courbe)."""
     ax.set_xlabel(label)
     ax.set_ylabel("Densité")
@@ -136,6 +202,7 @@ def _histo_gauss(ax, x: np.ndarray, label: str, point: float | None = None):
         _vide(ax)
         return
     ax.hist(x, bins="auto", density=True, color=BARRES, edgecolor="white", linewidth=1.5)
+    _ligne_theorique(ax, theo)
     ms = _mu_sigma(x)
     if not ms:
         ax.set_title(f"n = {len(x)} : gaussienne affichée à partir de {N_MIN_GAUSS} binômes")
@@ -146,15 +213,34 @@ def _histo_gauss(ax, x: np.ndarray, label: str, point: float | None = None):
             ax.legend(loc="upper right")
         return
     mu, sigma = ms
-    xs = _xs([x], [point] if point is not None else [])
+    xs = _xs([x], [v for v in (point, theo) if v is not None])
     ax.plot(xs, _pdf(xs, mu, sigma), color=COURBE, lw=2)
     ax.axvline(mu, color=COURBE, ls="--", lw=1)
-    ax.set_title(f"μ = {mu:.4g}   σ = {sigma:.3g}   n = {len(x)}")
+    ax.set_title(f"μ = {mu:.5g}   σ = {sigma:.3g}   n = {len(x)}")
     if point is not None:
         y = _pdf(point, mu, sigma)
         ax.plot([point], [y], "o", ms=10, color=ROUGE, mec="white", mew=2, zorder=5, label="Votre binôme")
         ax.axvline(point, color=ROUGE, lw=1, alpha=0.5)
-        ax.legend(loc="upper right")
+        ax.legend(loc="best")
+
+
+# matplotlib n'est pas thread-safe (analyseur mathtext notamment) ; Streamlit exécute
+# plusieurs sessions en parallèle. On dessine ET on rend l'image sous un verrou global.
+import threading as _threading
+
+_VERROU = _threading.Lock()
+
+
+def rendre_png(fonction, *args, **kwargs) -> bytes:
+    """Appelle une fonction figure_*(...) et renvoie l'image PNG, de façon thread-safe."""
+    with _VERROU:
+        fig = fonction(*args, **kwargs)
+        try:
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
+            return buf.getvalue()
+        finally:
+            plt.close(fig)
 
 
 def figure_distribution(df: pd.DataFrame, champs: list[dict], point: dict | None = None):
@@ -164,7 +250,7 @@ def figure_distribution(df: pd.DataFrame, champs: list[dict], point: dict | None
     fig, axes = plt.subplots(1, n, figsize=(5 * n, 4), squeeze=False)
     for ax, c in zip(axes[0], champs):
         x = df[c["col"]].dropna().to_numpy(dtype=float)
-        _histo_gauss(ax, x, c["label"], None if point is None else point.get(c["col"]))
+        _histo_gauss(ax, x, c["label"], None if point is None else point.get(c["col"]), c.get("theorique"))
     _axes_lisibles(fig)
     fig.tight_layout()
     return fig
@@ -187,7 +273,9 @@ def figure_intra_groupe(df: pd.DataFrame, champs: list[dict]):
                              gridspec_kw={"height_ratios": [3, 1.3]})
     for j, c in enumerate(champs):
         x = df[c["col"]].dropna().to_numpy(dtype=float)
-        _histo_gauss(axes[0, j], x, "", None)
+        _histo_gauss(axes[0, j], x, "", None, c.get("theorique"))
+        if c.get("theorique"):
+            axes[1, j].axvline(c["theorique"], color=THEO, lw=2, ls="-.")
         axes[0, j].set_xlabel("")
         ax = axes[1, j]
         ax.set_xlabel(c["label"])
@@ -223,7 +311,8 @@ def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites
         ax = axes[0, j]
         ax.set_xlabel(c["label"])
         ax.set_ylabel("Densité")
-        xs = _xs(series)
+        theo = c.get("theorique")
+        xs = _xs(series, [theo] if theo else [])
         if xs is None:
             _vide(ax)
         else:
@@ -234,6 +323,8 @@ def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites
                     ax.axvline(ms[0], color=couleur(i), ls="--", lw=1)
                 elif len(x):
                     ax.plot([], [], color=couleur(i), lw=2, label=f"{m} (n={len(x)}, < {N_MIN_GAUSS} : pas de courbe)")
+            if theo:
+                ax.axvline(theo, color=THEO, lw=2, ls="-.", label=f"Valeur théorique ({theo:g})")
             ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=8)
         # --- boîtes ou nuage
         ax = axes[1, j]
@@ -263,6 +354,8 @@ def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites
                     ax.errorbar(p + 0.3, ms[0], yerr=ms[1], fmt="D", color=ENCRE, ms=6, capsize=4, lw=1.5, zorder=4)
             ax.plot([], [], "D", color=ENCRE, label="moyenne ± σ")
             ax.legend(loc="best", fontsize=8)
+        if theo:
+            ax.axhline(theo, color=THEO, lw=2, ls="-.", zorder=2)
         ax.set_xticks(pos, [str(m) for m in modalites])
         ax.set_xlim(0.4, len(modalites) + 0.8)
         ax.grid(axis="x", visible=False)
@@ -272,16 +365,19 @@ def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites
 
 
 def statistiques_par(df: pd.DataFrame, champs: list[dict], par: str, modalites: list, nom: str) -> pd.DataFrame:
-    """Tableau n / moyenne / écart-type / CV par grandeur et par modalité."""
+    """Même tableau que statistiques(), par grandeur et par modalité (groupe ou année)."""
     lignes = []
     for c in champs:
         for m in modalites:
-            x = df.loc[df[par] == m, c["col"]].dropna()
-            moy = x.mean() if len(x) else np.nan
-            ecart = x.std(ddof=1) if len(x) > 1 else np.nan
-            lignes.append({"Grandeur": c["label"], nom: str(m), "n": len(x), "Moyenne": moy,
-                           "Écart-type": ecart, "CV (%)": 100 * ecart / moy if moy else np.nan})
-    return pd.DataFrame(lignes)
+            r = incertitude_type_a(df.loc[df[par] == m, c["col"]])
+            r["CV (%)"] = 100 * r["Écart-type"] / r["Moyenne"] if r["Moyenne"] else np.nan
+            lignes.append({"Grandeur": c["label"], nom: str(m), **r, **comparaison_theorique(r, c.get("theorique"))})
+    cols = ["Grandeur", nom, "n", "Résultat (95 %)", "Écart relatif (%)", "Compatible", "Moyenne", "Écart-type", "CV (%)", "u = σ/√N",
+            "t (95 %)", "Incertitude élargie"]
+    t = pd.DataFrame(lignes, columns=cols)
+    if not any(c.get("theorique") for c in champs):
+        t = t.drop(columns=["Écart relatif (%)", "Compatible"])
+    return t
 
 
 def vers_format_modele(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:

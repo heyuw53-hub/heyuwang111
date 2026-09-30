@@ -7,7 +7,7 @@ st.markdown(
     """
 Choisissez votre TP dans le menu à gauche :
 
-- **Polarographie** : concentrations (mol/L, ppm, µg)
+- **Polarographie** : masse de zinc dans la gélule de Rubozinc (µg)
 - **UV-Visible** : pourcentages massiques de caféine et d'AGC
 
 **Consignes de saisie**

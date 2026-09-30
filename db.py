@@ -73,9 +73,12 @@ def annees(exp: str) -> list[int]:
         return [r[0] for r in conn.execute(sa.select(t.c.annee).distinct().order_by(t.c.annee.desc()))]
 
 
-def charger(exp: str, annee: int) -> pd.DataFrame:
+def charger(exp: str, annee: int | None = None) -> pd.DataFrame:
+    """Saisies d'une année (ou de toutes les années si annee=None)."""
     t = TABLES[exp]
-    q = sa.select(t).where(t.c.annee == annee).order_by(t.c.groupe, t.c.binome)
+    q = sa.select(t).order_by(t.c.annee, t.c.groupe, t.c.binome)
+    if annee is not None:
+        q = q.where(t.c.annee == annee)
     with get_engine().connect() as conn:
         return pd.read_sql(q, conn)
 

@@ -72,6 +72,9 @@ def page_saisie(cle: str):
     except Exception as e:  # message lisible au lieu de la page d'erreur générique
         st.error(f"Erreur de base de données – résultat NON enregistré.\n\n`{type(e).__name__}: {str(e).splitlines()[0][:300]}`")
         return
+    # mémorisé pour la page « Résultats étudiants » (même onglet de navigateur)
+    st.session_state["mon_binome"] = {"tp": cle, "annee": int(annee), "groupe": groupe, "binome": int(binome)}
     st.success(("Résultat mis à jour" if remplace else "Résultat enregistré")
                + f" – {int(annee)}, groupe {groupe}, binôme {int(binome)}.")
     st.table({c["label"]: [f"{valeurs[c['col']]:.6g}"] for c in exp["champs"]})
+    st.page_link("pages/3_Resultats_etudiants.py", label="Voir où se situe mon résultat →", icon="📈")

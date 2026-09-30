@@ -56,29 +56,215 @@ def statistiques(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(lignes)
 
 
-def figure_distribution(df: pd.DataFrame, champs: list[dict]):
-    """Un histogramme (densité) par grandeur + loi normale ajustée (μ, σ des données)."""
+# ---------------------------------------------------------------------------
+# Graphiques
+# ---------------------------------------------------------------------------
+# Palette catégorielle (ordre fixe ; la couleur suit l'entité, jamais son rang)
+PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"]
+BARRES = "#9ec5f4"      # histogramme (bleu clair)
+COURBE = "#1c5cab"      # gaussienne (bleu foncé)
+ENCRE = "#3d3d3a"       # texte / médianes
+ROUGE = "#d62728"       # point de l'étudiant
+
+plt.rcParams.update({
+    "axes.spines.top": False, "axes.spines.right": False,
+    "axes.edgecolor": "#b5b4ad", "axes.labelcolor": ENCRE, "xtick.color": ENCRE, "ytick.color": ENCRE,
+    "axes.grid": True, "grid.color": "#e8e7e1", "grid.linewidth": 0.8, "axes.axisbelow": True,
+    "font.size": 9, "axes.titlesize": 10, "legend.frameon": False,
+})
+
+
+def _axes_lisibles(fig):
+    """Notation scientifique pour les très petites/grandes valeurs, 5 graduations max."""
+    from matplotlib.ticker import MaxNLocator, ScalarFormatter
+    for ax in fig.axes:
+        for axis in (ax.xaxis, ax.yaxis):
+            if isinstance(axis.get_major_formatter(), ScalarFormatter):
+                f = ScalarFormatter(useMathText=True)
+                f.set_powerlimits((-3, 4))
+                axis.set_major_formatter(f)
+                axis.set_major_locator(MaxNLocator(5))
+
+
+def couleur(i: int) -> str:
+    return PALETTE[i % len(PALETTE)]
+
+
+def _mu_sigma(x: np.ndarray):
+    if len(x) >= 2 and np.std(x, ddof=1) > 0:
+        return float(np.mean(x)), float(np.std(x, ddof=1))
+    return None
+
+
+def _pdf(xs, mu, sigma):
+    return np.exp(-0.5 * ((xs - mu) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
+
+
+def _xs(valeurs: list[np.ndarray], extra: list[float] = ()):
+    """Grille commune couvrant toutes les séries (et d'éventuels points)."""
+    bornes = []
+    for x in valeurs:
+        ms = _mu_sigma(x)
+        if len(x):
+            bornes += [x.min(), x.max()]
+        if ms:
+            bornes += [ms[0] - 4 * ms[1], ms[0] + 4 * ms[1]]
+    bornes += list(extra)
+    if not bornes:
+        return None
+    lo, hi = min(bornes), max(bornes)
+    if lo == hi:
+        lo, hi = lo - 1, hi + 1
+    return np.linspace(lo, hi, 400)
+
+
+def _vide(ax, texte="Aucune donnée"):
+    ax.text(0.5, 0.5, texte, ha="center", va="center", transform=ax.transAxes, color=ENCRE)
+
+
+def _histo_gauss(ax, x: np.ndarray, label: str, point: float | None = None):
+    """Histogramme + gaussienne ; `point` = valeur d'un étudiant (point rouge sur la courbe)."""
+    ax.set_xlabel(label)
+    ax.set_ylabel("Densité")
+    if len(x) == 0:
+        _vide(ax)
+        return
+    ax.hist(x, bins="auto", density=True, color=BARRES, edgecolor="white", linewidth=1.5)
+    ms = _mu_sigma(x)
+    if not ms:
+        ax.set_title(f"n = {len(x)} (pas assez de données pour la gaussienne)")
+        return
+    mu, sigma = ms
+    xs = _xs([x], [point] if point is not None else [])
+    ax.plot(xs, _pdf(xs, mu, sigma), color=COURBE, lw=2)
+    ax.axvline(mu, color=COURBE, ls="--", lw=1)
+    ax.set_title(f"μ = {mu:.4g}   σ = {sigma:.3g}   n = {len(x)}")
+    if point is not None:
+        y = _pdf(point, mu, sigma)
+        ax.plot([point], [y], "o", ms=10, color=ROUGE, mec="white", mew=2, zorder=5, label="Votre binôme")
+        ax.axvline(point, color=ROUGE, lw=1, alpha=0.5)
+        ax.legend(loc="upper right")
+
+
+def figure_distribution(df: pd.DataFrame, champs: list[dict], point: dict | None = None):
+    """Un histogramme (densité) par grandeur + loi normale ajustée (μ, σ des données).
+    `point` : {col: valeur} → la valeur est marquée d'un point rouge sur la courbe."""
     n = len(champs)
     fig, axes = plt.subplots(1, n, figsize=(5 * n, 4), squeeze=False)
     for ax, c in zip(axes[0], champs):
         x = df[c["col"]].dropna().to_numpy(dtype=float)
-        ax.set_xlabel(c["label"])
-        ax.set_ylabel("Densité")
-        if len(x) == 0:
-            ax.text(0.5, 0.5, "Aucune donnée", ha="center", va="center", transform=ax.transAxes)
-            continue
-        ax.hist(x, bins="auto", density=True, color="#4C72B0", alpha=0.7, edgecolor="white")
-        if len(x) >= 2 and x.std(ddof=1) > 0:
-            mu, sigma = x.mean(), x.std(ddof=1)
-            xs = np.linspace(min(x.min(), mu - 4 * sigma), max(x.max(), mu + 4 * sigma), 300)
-            ys = np.exp(-0.5 * ((xs - mu) / sigma) ** 2) / (sigma * np.sqrt(2 * np.pi))
-            ax.plot(xs, ys, color="#C44E52", lw=2)
-            ax.axvline(mu, color="#C44E52", ls="--", lw=1)
-            ax.set_title(f"μ = {mu:.4g}   σ = {sigma:.3g}   n = {len(x)}", fontsize=10)
-        else:
-            ax.set_title(f"n = {len(x)} (pas assez de données pour la gaussienne)", fontsize=10)
+        _histo_gauss(ax, x, c["label"], None if point is None else point.get(c["col"]))
+    _axes_lisibles(fig)
     fig.tight_layout()
     return fig
+
+
+def _jitter(n, largeur=0.12, graine=0):
+    return np.random.default_rng(graine).uniform(-largeur, largeur, n)
+
+
+def figure_intra_groupe(df: pd.DataFrame, champs: list[dict]):
+    """Un groupe : gaussienne (haut) + boîte à moustaches horizontale sur le même axe x (bas)."""
+    n = len(champs)
+    fig, axes = plt.subplots(2, n, figsize=(5 * n, 5.5), squeeze=False, sharex="col",
+                             gridspec_kw={"height_ratios": [3, 1.3]})
+    for j, c in enumerate(champs):
+        x = df[c["col"]].dropna().to_numpy(dtype=float)
+        _histo_gauss(axes[0, j], x, "", None)
+        axes[0, j].set_xlabel("")
+        ax = axes[1, j]
+        ax.set_xlabel(c["label"])
+        ax.grid(axis="y", visible=False)
+        if len(x) == 0:
+            ax.set_yticks([])
+            continue
+        ax.boxplot(x, vert=False, widths=0.5, patch_artist=True, showfliers=False,
+                   boxprops=dict(facecolor=BARRES, edgecolor=COURBE), medianprops=dict(color=ENCRE, lw=2),
+                   whiskerprops=dict(color=COURBE), capprops=dict(color=COURBE))
+        ax.set_yticks([])
+        ax.scatter(x, 1 + _jitter(len(x)), s=22, color=COURBE, edgecolor="white", linewidth=0.8, zorder=3)
+        # étiquette = n° de binôme, pour repérer qui est où
+        for v, yy, b in zip(x, 1 + _jitter(len(x)), df.loc[df[c["col"]].notna(), "binome"]):
+            ax.annotate(str(b), (v, yy), xytext=(0, 6), textcoords="offset points",
+                        ha="center", fontsize=7, color=ENCRE)
+    _axes_lisibles(fig)
+    fig.tight_layout()
+    return fig
+
+
+def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites: list, style: str):
+    """Comparaison entre modalités (groupes ou années).
+    Haut : une gaussienne par modalité, superposées.
+    Bas  : style="boite" → une boîte à moustaches par modalité, côte à côte ;
+           style="nuage" → nuage de points (x = modalité), avec moyenne ± σ."""
+    n = len(champs)
+    fig, axes = plt.subplots(2, n, figsize=(5.5 * n, 7.5), squeeze=False,
+                             gridspec_kw={"height_ratios": [1, 1.1]})
+    for j, c in enumerate(champs):
+        series = [df.loc[df[par] == m, c["col"]].dropna().to_numpy(dtype=float) for m in modalites]
+        # --- gaussiennes superposées
+        ax = axes[0, j]
+        ax.set_xlabel(c["label"])
+        ax.set_ylabel("Densité")
+        xs = _xs(series)
+        if xs is None:
+            _vide(ax)
+        else:
+            for i, (m, x) in enumerate(zip(modalites, series)):
+                ms = _mu_sigma(x)
+                if ms:
+                    ax.plot(xs, _pdf(xs, *ms), color=couleur(i), lw=2, label=f"{m} (n={len(x)})")
+                    ax.axvline(ms[0], color=couleur(i), ls="--", lw=1)
+                elif len(x):
+                    ax.plot([], [], color=couleur(i), lw=2, label=f"{m} (n={len(x)}, trop peu)")
+            ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=8)
+        # --- boîtes ou nuage
+        ax = axes[1, j]
+        ax.set_ylabel(c["label"])
+        pos = np.arange(1, len(modalites) + 1)
+        if style == "boite":
+            pleines = [(p, x, i) for i, (p, x) in enumerate(zip(pos, series)) if len(x)]
+            if pleines:
+                bp = ax.boxplot([x for _, x, _ in pleines], positions=[p for p, _, _ in pleines], widths=0.55,
+                                patch_artist=True, showfliers=False, medianprops=dict(color=ENCRE, lw=2))
+                for patch, (_, _, i) in zip(bp["boxes"], pleines):
+                    patch.set(facecolor=couleur(i), alpha=0.35, edgecolor=couleur(i))
+                for k, (p, x, i) in enumerate(pleines):
+                    for part in ("whiskers", "caps"):
+                        for line in bp[part][2 * k:2 * k + 2]:
+                            line.set_color(couleur(i))
+                    ax.scatter(p + _jitter(len(x), graine=k), x, s=18, color=couleur(i),
+                               edgecolor="white", linewidth=0.8, zorder=3)
+        else:
+            for i, (p, x) in enumerate(zip(pos, series)):
+                if not len(x):
+                    continue
+                ax.scatter(p + _jitter(len(x), 0.15, graine=i), x, s=22, color=couleur(i),
+                           edgecolor="white", linewidth=0.8, zorder=3)
+                ms = _mu_sigma(x)
+                if ms:
+                    ax.errorbar(p + 0.3, ms[0], yerr=ms[1], fmt="D", color=ENCRE, ms=6, capsize=4, lw=1.5, zorder=4)
+            ax.plot([], [], "D", color=ENCRE, label="moyenne ± σ")
+            ax.legend(loc="best", fontsize=8)
+        ax.set_xticks(pos, [str(m) for m in modalites])
+        ax.set_xlim(0.4, len(modalites) + 0.8)
+        ax.grid(axis="x", visible=False)
+    _axes_lisibles(fig)
+    fig.tight_layout()
+    return fig
+
+
+def statistiques_par(df: pd.DataFrame, champs: list[dict], par: str, modalites: list, nom: str) -> pd.DataFrame:
+    """Tableau n / moyenne / écart-type / CV par grandeur et par modalité."""
+    lignes = []
+    for c in champs:
+        for m in modalites:
+            x = df.loc[df[par] == m, c["col"]].dropna()
+            moy = x.mean() if len(x) else np.nan
+            ecart = x.std(ddof=1) if len(x) > 1 else np.nan
+            lignes.append({"Grandeur": c["label"], nom: str(m), "n": len(x), "Moyenne": moy,
+                           "Écart-type": ecart, "CV (%)": 100 * ecart / moy if moy else np.nan})
+    return pd.DataFrame(lignes)
 
 
 def vers_format_modele(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:

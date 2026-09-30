@@ -1,14 +1,15 @@
-"""Page enseignant : consultation en temps réel, nettoyage, distribution, export."""
+"""Page enseignant : vue d'ensemble, comparaisons intra-groupe / inter-groupes / inter-annuelle, export."""
 import hmac
 
 import pandas as pd
 import streamlit as st
 
 import db
-from analysis import excel, figure_distribution, nettoyer, statistiques, valeurs_aberrantes, vers_format_modele
+from analysis import (excel, figure_comparaison, figure_distribution, figure_intra_groupe, nettoyer,
+                      statistiques, statistiques_par, valeurs_aberrantes, vers_format_modele)
 from config import EXPERIENCES, GROUPES, SEUIL_DEFAUT
 
-st.set_page_config(page_title="Résultats", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Résultats enseignant", page_icon="📊", layout="wide")
 
 
 # ---------- Accès protégé ----------
@@ -29,7 +30,9 @@ def mot_de_passe_ok() -> bool:
     return False
 
 
-st.title("📊 Résultats")
+MODES = ["Vue d'ensemble", "Intra-groupe", "Inter-groupes", "Inter-annuel"]
+
+st.title("📊 Résultats – enseignant")
 if not mot_de_passe_ok():
     st.stop()
 
@@ -44,12 +47,20 @@ with st.sidebar:
     if not liste_annees:
         st.info("Aucune saisie pour ce TP.")
         st.stop()
-    annee = st.selectbox("Année", liste_annees)
-    groupes = st.multiselect("Groupes", GROUPES, default=GROUPES)
+    mode = st.radio("Affichage", MODES)
+    if mode != "Inter-annuel":
+        annee = st.selectbox("Année", liste_annees)
+    else:
+        annees_choisies = sorted(st.multiselect("Années", liste_annees, default=liste_annees))
+    if mode == "Intra-groupe":
+        groupe_seul = st.selectbox("Groupe", GROUPES)
+    else:
+        groupes = st.multiselect("Groupes", GROUPES, default=GROUPES)
     seuil = st.slider("Seuil de nettoyage (± %)", 5, 100, int(SEUIL_DEFAUT * 100), step=5) / 100
     reference = st.radio("Référence du nettoyage", ["moyenne", "médiane"],
                          help="Moyenne = scripts d'origine. Médiane = plus robuste aux valeurs aberrantes.")
-    donnees_affichees = st.radio("Distribution sur", ["données nettoyées", "données brutes"])
+    donnees_affichees = st.radio("Graphiques sur", ["données nettoyées", "données brutes"],
+                                 help="Nettoyage calculé séparément pour chaque année, sur tous les groupes.")
     auto = st.toggle("Actualisation automatique (10 s)", value=True)
 
 exp = EXPERIENCES[cle]
@@ -101,6 +112,69 @@ def tableau_de_bord():
         help=f"Aucune ligne supprimée. Jaune = valeur hors ±{seuil:.0%} de la {reference}.",
     )
 
+
+
+
+def preparer(df):
+    """Nettoie année par année (sur tous les groupes) si demandé."""
+    if donnees_affichees == "données brutes" or df.empty:
+        return df
+    return pd.concat([nettoyer(d, cols, seuil, reference)[0] for _, d in df.groupby("annee")])
+
+
+def tableau_stats(t):
+    st.dataframe(t, hide_index=True, column_config={
+        k: st.column_config.NumberColumn(format="%.4g") for k in ["Moyenne", "Écart-type", "CV (%)"]})
+
+
+@st.fragment(run_every=10 if auto else None)
+def intra_groupe():
+    d = preparer(db.charger(cle, annee))
+    d = d[d["groupe"] == groupe_seul] if not d.empty else d
+    st.subheader(f"Groupe {groupe_seul} – {annee} ({donnees_affichees})")
+    if d.empty:
+        st.info("Aucune donnée pour ce groupe.")
+        return
+    st.pyplot(figure_intra_groupe(d, champs), clear_figure=True)
+    st.caption("Boîte à moustaches : médiane, quartiles, étendue ; chaque point est un binôme (n° au-dessus).")
+    tableau_stats(statistiques(d, champs).drop(columns=["Min", "Max"]))
+
+
+@st.fragment(run_every=10 if auto else None)
+def inter_groupes():
+    d = preparer(db.charger(cle, annee))
+    presents = [g for g in groupes if not d.empty and (d["groupe"] == g).any()]
+    st.subheader(f"Comparaison des groupes – {annee} ({donnees_affichees})")
+    if not presents:
+        st.info("Aucune donnée pour les groupes choisis.")
+        return
+    st.pyplot(figure_comparaison(d, champs, "groupe", presents, "boite"), clear_figure=True)
+    tableau_stats(statistiques_par(d, champs, "groupe", presents, "Groupe"))
+
+
+@st.fragment(run_every=10 if auto else None)
+def inter_annuel():
+    d = preparer(db.charger(cle))
+    if not d.empty:
+        d = d[d["annee"].isin(annees_choisies) & d["groupe"].isin(groupes)]
+    presentes = [a for a in annees_choisies if not d.empty and (d["annee"] == a).any()]
+    st.subheader(f"Comparaison entre années ({donnees_affichees})")
+    if not presentes:
+        st.info("Aucune donnée pour les années choisies.")
+        return
+    st.pyplot(figure_comparaison(d, champs, "annee", presentes, "nuage"), clear_figure=True)
+    tableau_stats(statistiques_par(d, champs, "annee", presentes, "Année"))
+
+
+if mode == "Intra-groupe":
+    intra_groupe()
+    st.stop()
+if mode == "Inter-groupes":
+    inter_groupes()
+    st.stop()
+if mode == "Inter-annuel":
+    inter_annuel()
+    st.stop()
 
 tableau_de_bord()
 

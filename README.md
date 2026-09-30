@@ -5,7 +5,8 @@
 Accueil.py              首页（学生填写须知）
 pages/1_Polarographie.py  Polaro 表单
 pages/2_UV-Visible.py     UV 表单
-pages/3_Resultats.py      教师页（密码）：按年份/组别查看 / 清洗 / 直方图+高斯 / 导出 Excel（每年一个文件，一个 sheet）
+pages/3_Resultats_etudiants.py 学生结果页：本年分布 + 自己 binôme 的位置（红点）
+pages/4_Resultats_enseignant.py 教师页（密码）：总览 / 组内 / 组间 / 年际比较 / 导出 Excel
 config.py               所有字段、单位、校验范围、组别列表 —— 改表单只改这里
 saisie.py               表单与标准化逻辑
 db.py                   数据库（本地 SQLite，线上 PostgreSQL）

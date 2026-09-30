@@ -12,15 +12,15 @@ GROUPES = ["A", "B", "C", "D","CBT"]
 # Année de la promotion : bornes acceptées dans le formulaire
 ANNEE_MIN, ANNEE_MAX = 2000, 2100
 
-# Binôme : nombre de noms (min obligatoires, max possibles)
-BINOME_MIN, BINOME_MAX = 2, 3
+# Numéro de binôme : bornes acceptées (entier)
+BINOME_MIN, BINOME_MAX = 1, 99
 
 SEUIL_DEFAUT = 0.30  # ±30 % autour de la référence, comme dans les scripts d'origine
 
 EXPERIENCES = {
     "polaro": {
         "titre": "TP Polarographie",
-        "table": "tp_polaro",
+        "table": "resultats_polaro",
         "fichier_export": "TP_Polaro",
         "champs": [
             {"col": "conc_mol_l", "label": "Concentration (mol/L)", "min": 0, "max": None, "exemple": "ex. 1,25e-4"},
@@ -30,7 +30,7 @@ EXPERIENCES = {
     },
     "uv": {
         "titre": "TP UV-Visible",
-        "table": "tp_uv",
+        "table": "resultats_uv",
         "fichier_export": "TP_UV-Vis",
         "champs": [
             {"col": "pct_cafeine", "label": "pctg massique caféine", "min": 0, "max": 100, "exemple": "ex. 2,15"},

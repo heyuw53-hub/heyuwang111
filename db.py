@@ -21,11 +21,11 @@ for _cle, _exp in EXPERIENCES.items():
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
         sa.Column("annee", sa.Integer, nullable=False, index=True),
         sa.Column("groupe", sa.String(8), nullable=False),
-        sa.Column("binome", sa.String(300), nullable=False),
+        sa.Column("binome", sa.Integer, nullable=False),
         *[sa.Column(c["col"], sa.Float, nullable=False) for c in _exp["champs"]],
         sa.Column("cree_le", sa.DateTime(timezone=True), nullable=False),
-        # un seul résultat par binôme et par année : une nouvelle saisie remplace l'ancienne
-        sa.UniqueConstraint("annee", "binome", name=f"uq_{_exp['table']}_annee_binome"),
+        # un seul résultat par (année, groupe, binôme) : une nouvelle saisie remplace l'ancienne
+        sa.UniqueConstraint("annee", "groupe", "binome", name=f"uq_{_exp['table']}_annee_groupe_binome"),
     )
 
 
@@ -43,11 +43,11 @@ def get_engine() -> sa.Engine:
     return engine
 
 
-def enregistrer(exp: str, annee: int, groupe: str, binome: str, valeurs: dict) -> bool:
+def enregistrer(exp: str, annee: int, groupe: str, binome: int, valeurs: dict) -> bool:
     """Insère une saisie. Retourne True si une saisie précédente a été remplacée."""
     t = TABLES[exp]
     with get_engine().begin() as conn:
-        res = conn.execute(sa.delete(t).where(t.c.annee == annee, t.c.binome == binome))
+        res = conn.execute(sa.delete(t).where(t.c.annee == annee, t.c.groupe == groupe, t.c.binome == binome))
         conn.execute(
             sa.insert(t).values(
                 annee=annee,
@@ -69,7 +69,7 @@ def annees(exp: str) -> list[int]:
 
 def charger(exp: str, annee: int) -> pd.DataFrame:
     t = TABLES[exp]
-    q = sa.select(t).where(t.c.annee == annee).order_by(t.c.groupe, t.c.cree_le)
+    q = sa.select(t).where(t.c.annee == annee).order_by(t.c.groupe, t.c.binome)
     with get_engine().connect() as conn:
         return pd.read_sql(q, conn)
 

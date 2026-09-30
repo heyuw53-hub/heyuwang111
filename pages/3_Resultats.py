@@ -35,7 +35,11 @@ if not mot_de_passe_ok():
 # ---------- Paramètres ----------
 with st.sidebar:
     cle = st.radio("TP", list(EXPERIENCES), format_func=lambda k: EXPERIENCES[k]["titre"])
-    liste_annees = db.annees(cle)
+    try:
+        liste_annees = db.annees(cle)
+    except Exception as e:
+        st.error(f"Connexion à la base impossible : `{type(e).__name__}: {str(e).splitlines()[0][:300]}`")
+        st.stop()
     if not liste_annees:
         st.info("Aucune saisie pour ce TP.")
         st.stop()
@@ -96,7 +100,8 @@ tableau_de_bord()
 with st.expander("🗑️ Supprimer des saisies"):
     df = db.charger(cle, annee)
     choix = st.multiselect("Saisies à supprimer", df["id"].tolist(),
-                           format_func=lambda i: f"#{i} – {df.loc[df['id'] == i, 'binome'].iloc[0]}")
+                           format_func=lambda i: "#{} – groupe {} binôme {}".format(
+                               i, *df.loc[df["id"] == i, ["groupe", "binome"]].iloc[0]))
     if st.button("Supprimer", disabled=not choix):
         n = db.supprimer(cle, choix)
         st.success(f"{n} saisie(s) supprimée(s).")

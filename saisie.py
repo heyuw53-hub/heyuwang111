@@ -19,33 +19,19 @@ def lire_nombre(texte: str) -> float:
     return v
 
 
-def normaliser_nom(nom: str) -> str:
-    return " ".join(nom.split()).title()
-
-
-def former_binome(noms: list[str]) -> str:
-    """Noms normalisés et triés alphabétiquement, pour que l'ordre de saisie ne compte pas."""
-    return " / ".join(sorted(noms, key=str.casefold))
-
-
 def page_saisie(cle: str):
     exp = EXPERIENCES[cle]
     st.title(exp["titre"])
-    st.caption("Une seule saisie par binôme et par année : si vous renvoyez le formulaire, "
-               "votre résultat précédent est remplacé.")
+    st.caption("Une seule saisie par binôme : si vous renvoyez le formulaire avec la même année, "
+               "le même groupe et le même numéro de binôme, votre résultat précédent est remplacé.")
 
     with st.form(f"form_{cle}"):
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         annee = c1.number_input("Année", min_value=ANNEE_MIN, max_value=ANNEE_MAX, value=None,
                                 step=1, format="%d", placeholder=f"ex. {dt.date.today().year}")
         groupe = c2.selectbox("Groupe", GROUPES, index=None, placeholder="Choisir…")
-
-        st.markdown(f"**Binôme** ({BINOME_MIN} à {BINOME_MAX} personnes)")
-        noms_bruts = [
-            st.text_input(f"Nom Prénom {i + 1}" + ("" if i < BINOME_MIN else " (facultatif)"),
-                          placeholder="ex. Dupont Marie", key=f"{cle}_nom{i}")
-            for i in range(BINOME_MAX)
-        ]
+        binome = c3.number_input("N° de binôme", min_value=BINOME_MIN, max_value=BINOME_MAX, value=None,
+                                 step=1, format="%d", placeholder="ex. 3")
         st.divider()
         bruts = {c["col"]: st.text_input(c["label"], placeholder=c.get("exemple")) for c in exp["champs"]}
         envoye = st.form_submit_button("Envoyer", type="primary")
@@ -59,14 +45,8 @@ def page_saisie(cle: str):
     if not groupe:
         erreurs.append("Choisissez votre groupe.")
 
-    noms = [normaliser_nom(n) for n in noms_bruts if n and n.strip()]
-    if len(noms) < BINOME_MIN:
-        erreurs.append(f"Indiquez au moins {BINOME_MIN} noms pour le binôme.")
-    for n in noms:
-        if " " not in n:
-            erreurs.append(f"« {n} » : indiquez le nom ET le prénom.")
-    if len({n.casefold() for n in noms}) < len(noms):
-        erreurs.append("Le même nom apparaît deux fois dans le binôme.")
+    if binome is None:
+        erreurs.append("Indiquez votre numéro de binôme.")
 
     valeurs = {}
     for c in exp["champs"]:
@@ -87,8 +67,11 @@ def page_saisie(cle: str):
             st.error(e)
         return
 
-    binome = former_binome(noms)
-    remplace = db.enregistrer(cle, int(annee), groupe, binome, valeurs)
+    try:
+        remplace = db.enregistrer(cle, int(annee), groupe, int(binome), valeurs)
+    except Exception as e:  # message lisible au lieu de la page d'erreur générique
+        st.error(f"Erreur de base de données – résultat NON enregistré.\n\n`{type(e).__name__}: {str(e).splitlines()[0][:300]}`")
+        return
     st.success(("Résultat mis à jour" if remplace else "Résultat enregistré")
-               + f" – {int(annee)}, groupe {groupe}, binôme : {binome}.")
+               + f" – {int(annee)}, groupe {groupe}, binôme {int(binome)}.")
     st.table({c["label"]: [f"{valeurs[c['col']]:.6g}"] for c in exp["champs"]})

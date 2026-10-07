@@ -4,7 +4,7 @@ import streamlit as st
 
 import db
 from affichage import graphique
-from analysis import figure_distribution, incertitude_type_a, nettoyer
+from analysis import arrondi_resultat, figure_distribution, nettoyer
 from config import BINOME_MAX, BINOME_MIN, EXPERIENCES, GROUPES, N_MIN_GAUSS, SEUIL_DEFAUT
 
 st.set_page_config(page_title="Résultats étudiants", page_icon="📈", layout="wide")
@@ -44,25 +44,25 @@ def distribution():
     df = db.charger(cle, annee)
     garde, _ = nettoyer(df, cols, SEUIL_DEFAUT, "moyenne")
 
-    point = None
+    point, moi_ligne = None, None
     if groupe and binome:
         ligne = df[(df["groupe"] == groupe) & (df["binome"] == int(binome))]
         if ligne.empty:
             st.warning(f"Aucun résultat trouvé pour le groupe {groupe}, binôme {int(binome)} en {annee} "
                        "pour ce TP. Vérifiez vos informations ou soumettez d'abord votre résultat.")
         else:
-            point = {c: float(ligne.iloc[0][c]) for c in cols}
+            moi_ligne = ligne.iloc[0]
+            point = {c: float(moi_ligne[c]) for c in cols}
     else:
         st.info("Choisissez votre groupe et votre numéro de binôme pour voir votre position.")
 
+    if moi_ligne is not None and exp.get("incertitudes"):
+        st.markdown(f"##### Résultat de votre binôme (incertitude élargie, 95 %)")
+        for i in exp["incertitudes"]:
+            v = moi_ligne.get(i["col"])
+            txt = arrondi_resultat(moi_ligne[i["de"]], v) if v is not None and np.isfinite(v) else "–"
+            st.markdown(f"- {i['label'].replace(' ± v', '')} : **{txt}**")
     st.metric("Binômes pris en compte", len(garde))
-    for c in champs:
-        r = incertitude_type_a(garde[c["col"]])
-        if r["n"] > 1:
-            texte = f"**{c['label']} – résultat de la promotion (95 %) :** {r['Résultat (95 %)']}"
-            if c.get("theorique"):
-                texte += f" — valeur théorique : {c['theorique']:g}"
-            st.markdown(texte)
     graphique(figure_distribution, garde, champs, point=point)
 
     if point:

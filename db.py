@@ -23,6 +23,8 @@ for _cle, _exp in EXPERIENCES.items():
         sa.Column("groupe", sa.String(8), nullable=False),
         sa.Column("binome", sa.Integer, nullable=False),
         *[sa.Column(c["col"], sa.Float, nullable=False) for c in _exp["champs"]],
+        *[sa.Column(i["col"], sa.Float, nullable=True) for i in _exp.get("incertitudes", [])],
+        sa.Column("details", sa.Text, nullable=True),  # données de saisie et calculs intermédiaires (JSON)
         sa.Column("cree_le", sa.DateTime(timezone=True), nullable=False),
         # un seul résultat par (année, groupe, binôme) : une nouvelle saisie remplace l'ancienne
         sa.UniqueConstraint("annee", "groupe", "binome", name=f"uq_{_exp['table']}_annee_groupe_binome"),
@@ -49,7 +51,7 @@ def get_engine() -> sa.Engine:
     return engine
 
 
-def enregistrer(exp: str, annee: int, groupe: str, binome: int, valeurs: dict) -> bool:
+def enregistrer(exp: str, annee: int, groupe: str, binome: int, valeurs: dict, details: str | None = None) -> bool:
     """Insère une saisie. Retourne True si une saisie précédente a été remplacée."""
     t = TABLES[exp]
     with get_engine().begin() as conn:
@@ -59,6 +61,7 @@ def enregistrer(exp: str, annee: int, groupe: str, binome: int, valeurs: dict) -
                 annee=annee,
                 groupe=groupe,
                 binome=binome,
+                details=details,
                 cree_le=dt.datetime.now(dt.timezone.utc),
                 **valeurs,
             )

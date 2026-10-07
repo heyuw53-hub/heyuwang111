@@ -73,49 +73,29 @@ def arrondi_resultat(valeur: float, incertitude: float) -> str:
     return f"{round(valeur, -e):.{dec}f} ± {inc:.{dec}f}"
 
 
-def incertitude_type_a(x) -> dict:
-    """Série de N résultats (un par binôme) : incertitude de type A sur la moyenne.
-    σ (N-1) ; u = σ/√N ; incertitude élargie v = t(N-1, 95 %) · u."""
-    x = pd.Series(x, dtype=float).dropna()
-    n = len(x)
-    moy = x.mean() if n else np.nan
-    sigma = x.std(ddof=1) if n > 1 else np.nan
-    u = sigma / np.sqrt(n) if n > 1 else np.nan
-    t = t_student_95(n - 1) if n > 1 else np.nan
-    v = t * u if n > 1 else np.nan
-    return {"n": n, "Moyenne": moy, "Écart-type": sigma, "u = σ/√N": u, "t (95 %)": t,
-            "Incertitude élargie": v, "Résultat (95 %)": arrondi_resultat(moy, v)}
+COLONNES_NUMERIQUES = ["Valeur théorique", "Écart relatif (%)", "Moyenne", "Écart-type", "CV (%)", "Min", "Max"]
 
 
-def comparaison_theorique(r: dict, theo: float | None) -> dict:
-    """Écart relatif de la moyenne à la valeur théorique, et compatibilité :
-    la valeur théorique est-elle dans [moyenne − v ; moyenne + v] ?"""
-    if not theo:
-        return {"Valeur théorique": np.nan, "Écart relatif (%)": np.nan, "Compatible": "–"}
-    ecart = 100 * (r["Moyenne"] - theo) / theo
-    v = r["Incertitude élargie"]
-    compatible = "–" if not np.isfinite(v) else ("oui" if abs(r["Moyenne"] - theo) <= v else "non")
-    return {"Valeur théorique": theo, "Écart relatif (%)": ecart, "Compatible": compatible}
-
-
-COLONNES_NUMERIQUES = ["Valeur théorique", "Écart relatif (%)", "Moyenne", "Écart-type", "CV (%)", "u = σ/√N", "t (95 %)", "Incertitude élargie",
-                       "Min", "Max"]
+def _stats(x: pd.Series, theo: float | None) -> dict:
+    """n, moyenne, écart-type, CV (+ écart relatif à la valeur théorique). Pas d'incertitude
+    ici : les incertitudes sont calculées par binôme, à la saisie (incertitudes.py)."""
+    x = x.dropna()
+    moy = x.mean() if len(x) else np.nan
+    ecart = x.std(ddof=1) if len(x) > 1 else np.nan
+    r = {"n": len(x), "Moyenne": moy, "Écart-type": ecart, "CV (%)": 100 * ecart / moy if moy else np.nan}
+    if theo:
+        r["Valeur théorique"] = theo
+        r["Écart relatif (%)"] = 100 * (moy - theo) / theo
+    return r
 
 
 def statistiques(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:
     lignes = []
     for c in champs:
         x = df[c["col"]].dropna()
-        r = incertitude_type_a(x)
-        r["CV (%)"] = 100 * r["Écart-type"] / r["Moyenne"] if r["Moyenne"] else np.nan
-        lignes.append({"Grandeur": c["label"], **r, **comparaison_theorique(r, c.get("theorique")),
+        lignes.append({"Grandeur": c["label"], **_stats(x, c.get("theorique")),
                        "Min": x.min() if len(x) else np.nan, "Max": x.max() if len(x) else np.nan})
-    cols = ["Grandeur", "n", "Résultat (95 %)", "Valeur théorique", "Écart relatif (%)", "Compatible",
-            "Moyenne", "Écart-type", "CV (%)", "u = σ/√N", "t (95 %)", "Incertitude élargie", "Min", "Max"]
-    t = pd.DataFrame(lignes)[cols]
-    if not any(c.get("theorique") for c in champs):
-        t = t.drop(columns=["Valeur théorique", "Écart relatif (%)", "Compatible"])
-    return t
+    return pd.DataFrame(lignes)
 
 
 # ---------------------------------------------------------------------------
@@ -366,36 +346,33 @@ def figure_comparaison(df: pd.DataFrame, champs: list[dict], par: str, modalites
 
 def statistiques_par(df: pd.DataFrame, champs: list[dict], par: str, modalites: list, nom: str) -> pd.DataFrame:
     """Même tableau que statistiques(), par grandeur et par modalité (groupe ou année)."""
-    lignes = []
-    for c in champs:
-        for m in modalites:
-            r = incertitude_type_a(df.loc[df[par] == m, c["col"]])
-            r["CV (%)"] = 100 * r["Écart-type"] / r["Moyenne"] if r["Moyenne"] else np.nan
-            lignes.append({"Grandeur": c["label"], nom: str(m), **r, **comparaison_theorique(r, c.get("theorique"))})
-    cols = ["Grandeur", nom, "n", "Résultat (95 %)", "Écart relatif (%)", "Compatible", "Moyenne", "Écart-type", "CV (%)", "u = σ/√N",
-            "t (95 %)", "Incertitude élargie"]
-    t = pd.DataFrame(lignes, columns=cols)
-    if not any(c.get("theorique") for c in champs):
-        t = t.drop(columns=["Écart relatif (%)", "Compatible"])
-    return t
+    return pd.DataFrame([{"Grandeur": c["label"], nom: str(m), **_stats(df.loc[df[par] == m, c["col"]], c.get("theorique"))}
+                         for c in champs for m in modalites])
 
 
-def vers_format_modele(df: pd.DataFrame, champs: list[dict]) -> pd.DataFrame:
-    """Colonnes renommées pour l'affichage et l'export Excel."""
+def vers_format_modele(df: pd.DataFrame, champs: list[dict], incertitudes: list[dict] | None = None) -> pd.DataFrame:
+    """Colonnes renommées pour l'affichage et l'export Excel.
+    `incertitudes` (export Excel uniquement) : ajoute une colonne « a ± v » arrondie par binôme."""
     renommage = {"annee": "Année", "groupe": "Groupe", "binome": "Binôme",
                  **{c["col"]: c["label"] for c in champs}}
-    return df[list(renommage)].rename(columns=renommage)
+    vue = df[list(renommage)].rename(columns=renommage)
+    for i in incertitudes or []:
+        if i["col"] in df.columns:
+            vue[i["label"]] = [arrondi_resultat(a, v) if pd.notna(v) else "–"
+                               for a, v in zip(df[i["de"]], df[i["col"]])]
+    return vue
 
 
 JAUNE = "FFFF00"
 
 
-def excel(df: pd.DataFrame, champs: list[dict], feuille: str, masque: pd.DataFrame | None = None) -> bytes:
+def excel(df: pd.DataFrame, champs: list[dict], feuille: str, masque: pd.DataFrame | None = None,
+          incertitudes: list[dict] | None = None) -> bytes:
     """Classeur à une seule feuille. Si `masque` est fourni (cf. valeurs_aberrantes),
     les cellules aberrantes sont surlignées en jaune ; aucune ligne n'est supprimée."""
     from openpyxl.styles import PatternFill
 
-    vue = vers_format_modele(df, champs)
+    vue = vers_format_modele(df, champs, incertitudes)
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         vue.to_excel(w, sheet_name=feuille, index=False)

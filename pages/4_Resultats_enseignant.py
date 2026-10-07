@@ -91,9 +91,6 @@ def tableau_de_bord():
     graphique(figure_distribution, base, champs)
     st.dataframe(statistiques(base, champs), hide_index=True,
                  column_config={k: st.column_config.NumberColumn(format="%.4g") for k in COLONNES_NUMERIQUES})
-    st.caption("Résultat (95 %) = moyenne ± t·σ/√N (incertitude de type A, Student à N−1 degrés de liberté), "
-               "incertitude arrondie à 1 chiffre significatif par excès. "
-               "Compatible = la valeur théorique est dans l'intervalle moyenne ± incertitude élargie.")
 
     t1, t2, t3 = st.tabs([f"Toutes les saisies ({len(df)})", f"Gardées ({len(garde)})", f"Exclues ({len(exclu)})"])
     for onglet, d in [(t1, df), (t2, garde), (t3, exclu)]:
@@ -110,7 +107,7 @@ def tableau_de_bord():
 
     st.download_button(
         f"⬇️ Excel {annee} – toutes les saisies, valeurs aberrantes en jaune",
-        excel(df, champs, str(annee), masque=aberrant),
+        excel(df, champs, str(annee), masque=aberrant, incertitudes=exp.get("incertitudes")),
         file_name=f"{exp['fichier_export']}_{annee}.xlsx",
         help=f"Aucune ligne supprimée. Jaune = valeur hors ±{seuil:.0%} de la {reference}.",
     )

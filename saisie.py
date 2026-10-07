@@ -1,10 +1,12 @@
 """Formulaire de saisie standardisé, commun aux deux TP."""
 import datetime as dt
+import json
 import math
 
 import streamlit as st
 
 import db
+from incertitudes import FORMULAIRES
 from config import ANNEE_MAX, ANNEE_MIN, BINOME_MAX, BINOME_MIN, EXPERIENCES, GROUPES
 
 
@@ -33,7 +35,8 @@ def page_saisie(cle: str):
         binome = c3.number_input("N° de binôme", min_value=BINOME_MIN, max_value=BINOME_MAX, value=None,
                                  step=1, format="%d", placeholder="ex. 3")
         st.divider()
-        bruts = {c["col"]: st.text_input(c["label"], placeholder=c.get("exemple")) for c in exp["champs"]}
+        saisir, valider, afficher = FORMULAIRES[cle]
+        entrees = saisir(exp)
         envoye = st.form_submit_button("Envoyer", type="primary")
 
     if not envoye:
@@ -48,19 +51,8 @@ def page_saisie(cle: str):
     if binome is None:
         erreurs.append("Indiquez votre numéro de binôme.")
 
-    valeurs = {}
-    for c in exp["champs"]:
-        try:
-            v = lire_nombre(bruts[c["col"]])
-        except ValueError:
-            erreurs.append(f"« {c['label']} » : nombre invalide ({bruts[c['col']]!r}).")
-            continue
-        if c["min"] is not None and v <= c["min"]:
-            erreurs.append(f"« {c['label']} » doit être > {c['min']}.")
-        elif c["max"] is not None and v > c["max"]:
-            erreurs.append(f"« {c['label']} » doit être ≤ {c['max']}.")
-        else:
-            valeurs[c["col"]] = v
+    valeurs, resultat, erreurs_calcul = valider(exp, entrees)
+    erreurs += erreurs_calcul
 
     if erreurs:
         for e in erreurs:
@@ -68,7 +60,8 @@ def page_saisie(cle: str):
         return
 
     try:
-        remplace = db.enregistrer(cle, int(annee), groupe, int(binome), valeurs)
+        remplace = db.enregistrer(cle, int(annee), groupe, int(binome), valeurs,
+                                  json.dumps(resultat, default=float, ensure_ascii=False))
     except Exception as e:  # message lisible au lieu de la page d'erreur générique
         st.error(f"Erreur de base de données – résultat NON enregistré.\n\n`{type(e).__name__}: {str(e).splitlines()[0][:300]}`")
         return
@@ -76,5 +69,5 @@ def page_saisie(cle: str):
     st.session_state["mon_binome"] = {"tp": cle, "annee": int(annee), "groupe": groupe, "binome": int(binome)}
     st.success(("Résultat mis à jour" if remplace else "Résultat enregistré")
                + f" – {int(annee)}, groupe {groupe}, binôme {int(binome)}.")
-    st.table({c["label"]: [f"{valeurs[c['col']]:.6g}"] for c in exp["champs"]})
+    afficher(exp, resultat)
     st.page_link("pages/3_Resultats_etudiants.py", label="Voir où se situe mon résultat →", icon="📈")

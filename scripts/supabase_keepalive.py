@@ -12,19 +12,48 @@ import psycopg2
 TABLES = ["resultats_polaro_v3", "resultats_uv_v3"]
 
 
+def nettoyer_lien(url: str) -> str:
+    """Tolère les erreurs de copier-coller depuis les Secrets Streamlit :
+    DATABASE_URL = "postgresql+psycopg2://..."  →  postgresql://..."""
+    url = url.strip()
+    if url.upper().startswith("DATABASE_URL"):
+        url = url.split("=", 1)[1].strip()
+    url = url.strip("\"'").strip()
+    for prefixe in ("postgresql+psycopg2://", "postgres://"):
+        if url.startswith(prefixe):
+            url = "postgresql://" + url[len(prefixe):]
+    return url
+
+
+def masquer(texte: str, url: str) -> str:
+    """Retire le lien et le mot de passe d'un message d'erreur avant de l'afficher."""
+    texte = texte.replace(url, "<lien masqué>")
+    try:
+        mdp = url.split("://", 1)[1].split("@", 1)[0].split(":", 1)[1]
+        if mdp:
+            texte = texte.replace(mdp, "****")
+    except IndexError:
+        pass
+    return " ".join(texte.split())[:300]
+
+
 def main() -> int:
     url = os.environ.get("DATABASE_URL", "").strip()
     if not url:
         print("ERREUR : le secret DATABASE_URL n'est pas défini dans GitHub "
               "(Settings → Secrets and variables → Actions).")
         return 1
-    # même lien que dans Streamlit : on retire un éventuel « +psycopg2 »
-    url = url.replace("postgresql+psycopg2://", "postgresql://", 1)
+    url = nettoyer_lien(url)
+    if not url.startswith("postgresql://"):
+        print("ERREUR : le secret ne ressemble pas à un lien PostgreSQL. Il doit commencer par "
+              "« postgresql:// » (sans guillemets, sans « DATABASE_URL = »).")
+        return 1
     try:
         conn = psycopg2.connect(url, connect_timeout=30)
-    except Exception as e:  # ne jamais afficher le lien (il contient le mot de passe)
-        print(f"ERREUR de connexion : {type(e).__name__}. Le projet Supabase est peut-être en pause "
-              "(Dashboard → Resume) ou le mot de passe a changé.")
+    except Exception as e:
+        print(f"ERREUR de connexion ({type(e).__name__}) : {masquer(str(e), url)}")
+        print("Causes possibles : projet Supabase en pause (Dashboard → Resume), mot de passe modifié, "
+              "ou lien « Direct connection » au lieu de « Session pooler ».")
         return 1
     with conn, conn.cursor() as cur:
         cur.execute("SELECT now()")
